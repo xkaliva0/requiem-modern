@@ -1,0 +1,20 @@
+# build output
+launcher/dist/
+launcher/dist_lite/
+launcher/build*/
+*.spec
+menu/RequiemMenu.dll
+menu/*.lib
+menu/*.pdb
+__pycache__/
+*.log
+# HD art and anything taken from the game: never in this repository
+hd/
+*.bin
+*.art
+*.dat
+*.BMP
+*.bmp
+*.png
+*.sav
+D3D.exe*

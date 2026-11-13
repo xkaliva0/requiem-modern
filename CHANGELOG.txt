@@ -1,0 +1,107 @@
+Requiem Modern - changelog
+==========================
+
+2.0.1
+  - The game's volumes and footsteps are on the Audio tab.
+  - Clicking the left arrow of a setting steps it down (clicking anywhere else on the row still steps it up).
+
+2.0.0
+  - Settings now wait for Apply: change what you like, then Apply (A) installs it, or Discard (D) drops it. Play uses only applied settings.
+  - The game's own options are here: brightness, crosshairs, shadows, effects, subtitles, volumes, footsteps (Game tab), mouse and movement options and every key binding (Controls tab).
+  - F10 while you play opens these settings over the paused game. The game's own options change live; the rest take effect the next time you start the game.
+  - F10 belongs to these settings now: the game's own F10 (Take Screenshot) moves to F12 when F12 is free.
+
+1.9.8
+  - Borderless alt-tab: the paused game keeps its picture behind your other windows, and clicking it (or alt-tab) brings the game back. Your other windows stay on top.
+
+1.9.7
+  - Undid 1.9.6: the paused picture stayed on top of other windows while clicks went through it. Alt-tab keeps the game open again, with a black window while you are away.
+
+1.9.6
+  - Borderless alt-tab: the paused game keeps showing its last picture behind your other windows instead of going black.
+
+1.9.5
+  - Borderless alt-tab fix moved to the lowest level of Windows, so compatibility shims on the game cannot get around it.
+
+1.9.4
+  - Borderless alt-tab fix now also works where Windows applies compatibility shims to the game.
+
+1.9.3
+  - Borderless now really is borderless: alt-tab leaves the game on screen behind your other windows instead of minimising it.
+
+1.9.2
+  - Fixed: the mouse did nothing in pop-up dialogs such as the quit confirmation.
+
+1.9.1
+  - Fixed: the mouse did nothing in the full-resolution menus (only the keyboard worked).
+
+1.9.0
+  - Each HD upgrade is its own option: HD textures, HD effects, HD HUD icons and HD menu art (Graphics). Your current choice carries over.
+
+1.8.0
+  - Menus at the game resolution (new option, on by default): menus, briefings and videos are drawn at full resolution with AI-upscaled art and sharp text, instead of a stretched 640x480.
+
+1.7.0
+  - HD HUD: the 63 HUD icons and digits are 4x sharper (part of the HD textures option). Item and weapon labels stay crisp pixel lettering.
+
+1.6.3
+  - Water is smooth again: the game builds its ripples from the original water textures every frame, so those six stay original.
+  - Animated textures (water scroll, skin faces) re-upload at the full HD size.
+
+1.6.2
+  - Water and effects (fire, lightning, explosions, glows) keep their original shimmer in HD: the AI upscaler had smoothed it away.
+
+1.6.1
+  - Fixed striped character skins in HD (their face frames were read in the wrong order).
+  - The red highlight round the active HUD icon is scaled with the HUD instead of staying small.
+
+1.6.0
+  - HD textures now cover all 2,686 textures: monster and character skins (with their animated faces), effects, glows and small details.
+  - The game's fixed memory area is 128 MB instead of 8 MB, so the HD skins fit.
+  - An older HD install is upgraded automatically.
+
+1.5.1
+  - HD textures are an option (off by default): turning it on in Graphics > Textures installs them right away, turning it off puts the originals back.
+
+1.5.0
+  - HD textures: 2,496 of the game's textures upscaled 4x (Real-ESRGAN), on by default in Graphics > Textures.
+
+1.4.0
+  - New Display mode setting: Borderless (as before) or exclusive Fullscreen.
+
+1.3.4
+  - Frame rate descriptions updated with new measurements: jumps are only 3-5% lower above 60 fps (180 fps was listed as 14%).
+
+1.3.3
+  - Enemies running at you from a distance leap as often per second at 120 fps as at 60 (the chance was rolled per frame).
+
+1.3.2
+  - Enemies lunge as often at 120 fps as at 60: a crouching enemy no longer loses its footing every other frame, which made it miss half its leaps.
+
+1.3.1
+  - No more black screen when a level starts: the game no longer switches your monitor to another refresh rate; the frame rate is capped instead.
+
+1.3.0
+  - Enemies attack and lunge as often at 120 fps and Unlimited as at 60: their footing no longer flickers more at high frame rates.
+
+1.2.1
+  - Enemy leaps, knock-back and debris slow down per second, not per frame: lunges at 120 fps match 60 fps.
+
+1.2.0
+  - High frame rates: enemy animations, an area-damage effect and slow motion no longer run slow or stall above 120 fps.
+
+1.1.0
+  - Sound mixed at 44.1 kHz / 16-bit instead of Miles' low-quality default.
+  - EAX reverb and 3D positional sound restored through DSOAL, with a headphone (HRTF) mode.
+
+1.0.0
+  - Runs on Windows 10/11: fixed the DirectX check, the wrapper loading and the 3D start-up.
+  - DDrawCompat wrapper: high resolutions without changing your display, clean alt-tab.
+  - Correct widescreen view for any screen shape (4:3, 16:9, 21:9).
+  - HUD scaling, so health and ammo are readable at high resolutions.
+  - Frame rates above 60, with jump and walking physics measured at each rate.
+  - Crash fixes: the 'DrawPrim failed' freeze, a renderer list crash, losing focus quitting the game.
+  - Faster switch into a level (the 3D device is built once, not twice).
+  - Smooth menus at 1080p with a normal mouse cursor.
+  - Settings for anti-aliasing, texture filtering and menu sharpness.
+  - No more 'DirectInput could not acquire keyboard' quits: input is picked up again when the game gets focus.
