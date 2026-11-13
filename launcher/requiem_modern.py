@@ -26,7 +26,7 @@ from PIL import Image, ImageChops, ImageDraw, ImageTk
 import game_cfg
 import patch_d3d
 
-APP, VERSION = "Requiem Modern", "2.0.1"
+APP, VERSION = "Requiem Modern", "2.0.2"
 W, H = 1280, 720
 CONF_DIR = os.environ.get("REQUIEM_MODERN_CONF") or os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), APP)
 CONF = os.path.join(CONF_DIR, "launcher.json")
@@ -47,7 +47,9 @@ HRTF_INI = "[general]\nchannels=stereo\nstereo-mode=headphones\nstereo-encoding=
 RESOLUTIONS = [(640, 480), (800, 600), (1024, 768), (1280, 720), (1600, 900), (1440, 1080), (1920, 1080),
                (2560, 1080), (2560, 1440), (3440, 1440), (3840, 2160)]
 
-CHANGES = [("2.0.1", [
+CHANGES = [("2.0.2", [
+    "Fixed: after the game was reinstalled (or GOG checked its files) over an HD install, HD textures and HD menu art were not put back. The launcher now checks the files themselves.",
+]), ("2.0.1", [
     "The game's volumes and footsteps are on the Audio tab.",
     "Clicking the left arrow of a setting steps it down (clicking anywhere else on the row still steps it up).",
 ]), ("2.0.0", [
@@ -254,8 +256,18 @@ def hd_payload():
 
 
 def hd_installed(folder):
+    """HD textures are in the archive: the marker is there AND the archive is not the original. (A reinstall or
+    GOG's file check puts the original archive back and leaves the marker; that marker is stale.)"""
     d = find_ci(folder, "Art", "D3D")
-    return bool(d) and os.path.exists(os.path.join(d, HD_MARK))
+    if not d or not os.path.exists(os.path.join(d, HD_MARK)):
+        return False
+    art, bart = os.path.join(d, "ReqArtD3.art"), os.path.join(folder, BACKUP, "ReqArtD3.art")
+    try:
+        if os.path.getsize(art) == (os.path.getsize(bart) if os.path.exists(bart) else 24761756):   # GOG v1.2 size
+            return False
+    except OSError:
+        return False
+    return True
 
 
 # 16-bit textures that are character skins, not effects (they stay with "HD textures")
@@ -275,6 +287,8 @@ def hd_sel(s):
 def hd_current(folder, sel):
     """The texture archive holds this launcher's payload with this selection (1.7 and older markers: both groups)."""
     p = hd_payload()
+    if not hd_installed(folder):
+        return False
     try:
         m = open(os.path.join(find_ci(folder, "Art", "D3D"), HD_MARK)).read()
         return bool(p) and f"payload {p[2]}" in m and (f"sel {sel}" in m if " sel " in m else sel == "11")
@@ -337,7 +351,7 @@ def set_menu(folder, s):
                     b = os.path.join(root, n); shutil.copyfile(b, os.path.join(dibs, os.path.relpath(b, bk)))
             os.remove(mark)
         return
-    if not (os.path.exists(mark) and open(mark).read().strip() == key):
+    if not (os.path.exists(mark) and open(mark).read().strip() == key and menu_art_built(folder)):
         masters = None
         if p:
             with open(p[0], "rb") as f:
@@ -363,12 +377,22 @@ def menu_want(folder, s):
     return w, h, scale, on, f"{scale:.4f} " + (f"payload {p[2]}" if p else "original"), p
 
 
+def menu_art_built(folder):
+    """The menu art on disk really is the rebuilt one: the title screen carries the 'RQHD' header (a reinstall puts
+    the originals back and leaves the marker)."""
+    p = find_ci(folder, "media", "DIBs", "Splash01", "splash01.BMP")
+    try:
+        return bool(p) and open(p, "rb").read(42)[38:42] == b"RQHD"
+    except OSError:
+        return False
+
+
 def menu_current(folder, s):
     """True when the menu art on disk matches these settings (no rebuild needed on Play)."""
     _, _, _, on, key, _ = menu_want(folder, s)
     dibs = find_ci(folder, "media", "DIBs")
     mark = os.path.join(dibs, MENU_MARK) if dibs else ""
-    have = os.path.exists(mark)
+    have = os.path.exists(mark) and menu_art_built(folder)
     return (not on and not have) or (on and have and open(mark).read().strip() == key)
 
 
