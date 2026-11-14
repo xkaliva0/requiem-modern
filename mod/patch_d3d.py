@@ -502,13 +502,22 @@ def gen_patches():
          + b"\xc7\x05" + struct.pack("<I", _GENSAVE) + b"\x00\x00\x00\x00"
          + b"\x0f\xbf\x43\x04" b"\x0f\xbf\x4b\x06")                     # displaced: movsx eax/ecx, [ebx+4]/[ebx+6]
     b += _jmp(b_at + len(b), 0x506609)
-    c = a + b
+    # Face animation (skins, 0x4f58b0): each frame is copied into the atlas row by row with the pitch taken from the
+    # texture RECORD width (the original 256), while an HD atlas is 1024 wide, so the face rows landed in other parts
+    # of the skin (user: faces on the side of the head and on the legs). The pitch now comes from the texture's own
+    # decoded header (frames start [anim+0xc] - 0x412), which is the record width when the texture is not HD.
+    f_at = b_at + len(b)
+    f = b"\x8b\x53\x0c" b"\x0f\xb7\x92\xee\xfb\xff\xff" b"\x0f\xaf\xee"   # edx = header w; displaced imul ebp, esi
+    f += _jmp(f_at + len(f), 0x4F58FC)
+    c = a + b + f
     assert CAVE + len(c) <= _DECAY
     return [(CAVE, bytes(len(c)), c, "HD textures: generated textures set up at the HD size (code)"),
             (0x5060FA, bytes.fromhex("8b7b14897c241c"), _jmp(0x5060FA, CAVE) + b"\x90\x90",
              "HD textures: generated textures (stained glass) set up at the HD size"),
             (0x506601, bytes.fromhex("0fbf43040fbf4b06"), _jmp(0x506601, b_at) + b"\x90\x90\x90",
-             "HD textures: generated textures keep their original record size")]
+             "HD textures: generated textures keep their original record size"),
+            (0x4F58F5, bytes.fromhex("0fbf57040fafee"), _jmp(0x4F58F5, f_at) + b"\x90\x90",
+             "HD textures: face animation frames copied at the atlas's own row length")]
 RING = 0x6BF400   # unused tail of .data (vsize ends 0x6bf2f8, mapped to 0x6c0000): dword index, then 32 x 16-byte entries
 FRAME = 0x531FD8  # frame counter, incremented at the top of the frame function 0x448450
 DEVICE = 0x6B9F74  # IDirect3DDevice3*

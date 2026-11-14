@@ -1,6 +1,12 @@
 Requiem Modern - changelog
 ==========================
 
+2.1.1
+  - Fixed: with HD textures, characters with animated faces showed extra copies of their face on other parts of the body (side of the head, legs) when the face moved.
+  - Fixed: debris and other plain single-colour textures looked grainy with HD textures; they now stay plain, as in the original game.
+  - MAKE HD ART makes cleaner textures (no grain on smooth surfaces). If you made your HD art with 2.1.0, REMAKE HD ART (main menu) gives you the cleaner set; your current art keeps working meanwhile.
+  - The six see-through grilles (e.g. the skylight grates) are upscaled with the AI like other surfaces instead of being smoothed, which made their bars blotchy. (REMAKE HD ART.)
+
 2.1.0
   - MAKE HD ART (main menu): the launcher makes the HD textures, HUD icons and menu art itself, from your own game files, with the AI upscaler that comes with it (Real-ESRGAN). The download no longer carries any of the game's art, so it is much smaller.
   - Fixed: with HD textures, textures the game animates from another texture (the stained-glass window at the end of the opening tunnel) came out as combed stripes. They are now drawn in HD too.

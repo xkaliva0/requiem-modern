@@ -860,3 +860,22 @@ Lab folder: the development folder; `mod\`, `launcher\`, `menu\`, `hd\` and `tes
   the target surface really is the HD size (GetSurfaceDesc).
 - Verified (test copy, New Game, level start): window HD, sharp glass and lead lines, smooth ripple; log
   "HD generated textures: on".
+
+### 2.1.1: face frames, flat textures, quantization (2026-11-14)
+- User screenshots: the homeless man (and every skin with face animation) had extra faces on the side of the head
+  and the legs, changing with the face animation. 0x4f58b0 (type-4 anim object: +0xc frames start, +0x10/+0x14
+  frame w/h, +0x18/+0x1c position) copies a frame into the atlas with the pitch from the texture RECORD width
+  ([rec+4], the original 256) while the HD atlas is 1024 wide. Patch at 0x4F58F5: pitch from the decoded header
+  ([anim+0xc] - 0x412), identical when not HD. All 39 skins with frames (3500-3538).
+- User screenshot: grainy debris. 94 textures are one flat colour in the GOG archive (1-24, 469, 479-481, 948,
+  1088-1109, 1501-1524, 1892-1899, 1976, 2083-2098, 2170-2172, 2550); Real-ESRGAN's faint variation became
+  Floyd-Steinberg speckle. hd_make.FLAT (KEEP = WATER | FLAT) stays original, also skipped by set_hd for art made
+  by 2.1.0 (marker "keep N" forces the rebuild).
+- Palette mapping (hd_build._pixels): nearest colour, which was as close to the AI image as FS on every texture
+  measured and without the grain; FS only for smooth gradients the palette cannot follow (error > 10 and the AI image
+  smooth: 3217/3218 banded into blotches). done.txt "v2"; the launcher offers REMAKE HD ART for older art and makes
+  into "HD art new", swapping it in when complete (cancel keeps the old art).
+- User screenshot: blotchy skylight grille. The six 16-bit A1R5G5B5 textures (flag 0x80: 642/643/1002/1003/2253/
+  2254, on/off alpha, speckled bars) counted as effects (16-bit single frame) and got Lanczos, which smeared the
+  speckle into blotches. is_effect (hd_make and launcher) now excludes flag 0x80: AI like other surfaces (alpha kept
+  binary). Real effects are all A4R4G4B4.

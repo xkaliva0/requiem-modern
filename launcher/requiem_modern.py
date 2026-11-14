@@ -28,7 +28,7 @@ from PIL import Image, ImageChops, ImageDraw, ImageTk
 import game_cfg
 import patch_d3d
 
-APP, VERSION = "Requiem Modern", "2.1.0"
+APP, VERSION = "Requiem Modern", "2.1.1"
 W, H = 1280, 720
 CONF_DIR = os.environ.get("REQUIEM_MODERN_CONF") or os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), APP)
 CONF = os.path.join(CONF_DIR, "launcher.json")
@@ -49,7 +49,12 @@ HRTF_INI = "[general]\nchannels=stereo\nstereo-mode=headphones\nstereo-encoding=
 RESOLUTIONS = [(640, 480), (800, 600), (1024, 768), (1280, 720), (1600, 900), (1440, 1080), (1920, 1080),
                (2560, 1080), (2560, 1440), (3440, 1440), (3840, 2160)]
 
-CHANGES = [("2.1.0", [
+CHANGES = [("2.1.1", [
+    "Fixed: with HD textures, characters with animated faces showed extra copies of their face on other parts of the body (side of the head, legs) when the face moved.",
+    "Fixed: debris and other plain single-colour textures looked grainy with HD textures; they now stay plain, as in the original game.",
+    "MAKE HD ART makes cleaner textures (no grain on smooth surfaces). If you made your HD art with 2.1.0, REMAKE HD ART (main menu) gives you the cleaner set; your current art keeps working meanwhile.",
+    "The six see-through grilles (e.g. the skylight grates) are upscaled with the AI like other surfaces instead of being smoothed, which made their bars blotchy. (REMAKE HD ART.)",
+]), ("2.1.0", [
     "MAKE HD ART (main menu): the launcher makes the HD textures, HUD icons and menu art itself, from your own game files, with the AI upscaler that comes with it (Real-ESRGAN). The download no longer carries any of the game's art, so it is much smaller.",
     "Fixed: with HD textures, textures the game animates from another texture (the stained-glass window at the end of the opening tunnel) came out as combed stripes. They are now drawn in HD too.",
 ]), ("2.0.2", [
@@ -241,6 +246,14 @@ def art_made():
     return os.path.exists(os.path.join(GEN, "done.txt"))
 
 
+def art_old():
+    """The HD art was made by an older MAKE HD ART (done.txt without "v2": dithered palette textures)."""
+    try:
+        return art_made() and "v2" not in open(os.path.join(GEN, "done.txt")).read()
+    except OSError:
+        return False
+
+
 def hud_src():
     return os.environ.get("REQUIEM_MODERN_HUD") or (os.path.join(GEN, "hud") if art_made() else "")
 
@@ -287,7 +300,7 @@ SKIN16 = {1166, 1167, 1168, 1169, 3001, 3016, 3053, 3248, 3260, 3271, 3280, 3318
 
 def is_effect(i, tex):
     """Fire, lightning, explosions, glows: the 16-bit single-frame textures (decoded header: +0xc frames, +0xe bpp)."""
-    return tex[0xE] == 2 and tex[0xC] == 0 and i not in SKIN16
+    return tex[0xE] == 2 and tex[0xC] == 0 and not tex[0x10] & 0x80 and i not in SKIN16   # 0x80: grilles (hd_make)
 
 
 def hd_sel(s):
@@ -302,7 +315,8 @@ def hd_current(folder, sel):
         return False
     try:
         m = open(os.path.join(find_ci(folder, "Art", "D3D"), HD_MARK)).read()
-        return bool(p) and f"payload {p[2]}" in m and (f"sel {sel}" in m if " sel " in m else sel == "11")
+        import hd_make
+        return bool(p) and f"payload {p[2]}" in m and f"sel {sel}" in m and f"keep {len(hd_make.KEEP)}" in m
     except (OSError, TypeError):
         return False
 
@@ -437,7 +451,7 @@ def set_hd(folder, sel):
     hd, pos = {}, 4
     for _ in range(struct.unpack_from("<I", data, 0)[0]):
         i, n = struct.unpack_from("<2I", data, pos); t = data[pos + 8:pos + 8 + n]; pos += 8 + n
-        if sel[1 if is_effect(i, t) else 0] == "1":
+        if sel[1 if is_effect(i, t) else 0] == "1" and i not in hd_make.KEEP:   # KEEP: water, flat colours stay original
             hd[i] = t
     orig = open(bart, "rb").read(); offs = struct.unpack("<4001I", open(bdat, "rb").read())
     ends = sorted(o for o in offs if o != 0xFFFFFFFF) + [len(orig)]
@@ -454,7 +468,7 @@ def set_hd(folder, sel):
                 f.write(orig[o:nxt[o]])
     open(dat + ".tmp", "wb").write(struct.pack(f"<{len(new)}I", *new))
     os.replace(art + ".tmp", art); os.replace(dat + ".tmp", dat)
-    open(mark, "w").write(f"{APP} {VERSION}: {len(hd)} HD textures, payload {size} sel {sel}\n")
+    open(mark, "w").write(f"{APP} {VERSION}: {len(hd)} HD textures, payload {size} sel {sel} keep {len(hd_make.KEEP)}\n")
 
 
 def ours_ini(p):
@@ -865,7 +879,10 @@ class App:
                  "Installs the modern setup into the game folder. Everything it replaces is backed up first."),
                 *([("MAKE HD ART", self.make_art,
                     "Makes HD textures, HUD icons and menu art from your own game files with the bundled AI upscaler "
-                    "(Real-ESRGAN). Done once; then turn the HD options on in Settings, Graphics.")] if self.state in ("ready", "installed") and not art_made() else []),
+                    "(Real-ESRGAN). Done once; then turn the HD options on in Settings, Graphics.")] if self.state in ("ready", "installed") and not art_made() else
+                  [("REMAKE HD ART", self.make_art,
+                    "This version makes cleaner HD textures (no grain on smooth surfaces). Takes 15 to 20 minutes; your "
+                    "current HD art keeps working until it is done.")] if self.state in ("ready", "installed") and art_old() else []),
                 ("RESTORE ORIGINAL GAME", self.do_restore, "Removes the modern setup and puts every original file back."),
                 ("GAME FOLDER", lambda: self.goto("setup"), "Choose a different Requiem folder."),
                 ("QUIT", self.quit, "Close the launcher.")]
@@ -940,9 +957,11 @@ class App:
             try:
                 hd_make.EXE = res_path(UPSCALER)
                 src = hd_make.originals(dibs, bk, os.path.join(work, "DIBs"))
-                m["done"] = ("ok", hd_make.make(art, art[:-4] + ".dat", src, GEN, progress))
+                ok = hd_make.make(art, art[:-4] + ".dat", src, GEN + " new", progress)   # the old art stays until done
+                shutil.rmtree(GEN, ignore_errors=True); os.replace(GEN + " new", GEN)
+                m["done"] = ("ok", ok)
             except BaseException as ex:
-                shutil.rmtree(GEN, ignore_errors=True)
+                shutil.rmtree(GEN + " new", ignore_errors=True)
                 m["done"] = ("cancel" if m["cancel"] else "error", f"{type(ex).__name__}: {ex}")
             finally:
                 shutil.rmtree(work, ignore_errors=True)
@@ -963,7 +982,7 @@ class App:
                      " Your graphics card could not run the AI upscaler, so the textures were enlarged smoothly instead "
                      "and HD HUD icons and HD menu art are not available."))
         elif kind == "cancel":
-            self.say("CANCELLED", "No HD art was made.")
+            self.say("CANCELLED", "No new HD art was made." + (" Your existing HD art is unchanged." if art_made() else ""))
         else:
             self.say("COULD NOT MAKE HD ART", info)
 

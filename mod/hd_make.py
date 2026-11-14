@@ -14,6 +14,10 @@ import blast, hd_build, hd_rest, hud_hd, menu_hd, tex_extract
 
 EXE = None
 WATER = {8, 9, 82, 1508, 1509, 1582}
+# one flat colour in the GOG v1.2 archive (debris colours etc.): nothing to upscale, and the AI's faint variation came
+# out as speckle after palette mapping (user: grainy debris). They stay original, like WATER.
+FLAT = {1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 469, 479, 480, 481, 948, 1088, 1089, 1090, 1091, 1092, 1093, 1094, 1095, 1096, 1097, 1098, 1099, 1100, 1106, 1107, 1108, 1109, 1501, 1502, 1503, 1504, 1505, 1506, 1507, 1510, 1511, 1512, 1513, 1514, 1515, 1516, 1517, 1518, 1519, 1520, 1521, 1522, 1523, 1524, 1892, 1893, 1894, 1895, 1896, 1897, 1898, 1899, 1976, 2083, 2084, 2085, 2086, 2087, 2088, 2089, 2090, 2091, 2092, 2093, 2094, 2095, 2096, 2097, 2098, 2170, 2171, 2172, 2550}
+KEEP = WATER | FLAT
 SKIN16 = {1166, 1167, 1168, 1169, 3001, 3016, 3053, 3248, 3260, 3271, 3280, 3318}
 PAD = 16
 NO_WINDOW = 0x08000000
@@ -31,7 +35,9 @@ def archive(art, dat):
 
 
 def is_effect(i, raw):
-    return raw[0xE] == 2 and raw[0xC] == 0 and i not in SKIN16
+    # 16-bit single-frame non-skins with soft alpha (A4R4G4B4); the six on/off-alpha ones (A1R5G5B5, flag 0x80:
+    # 642/643/1002/1003/2253/2254) are grilles: AI, not Lanczos (Lanczos smeared their speckle into blotches).
+    return raw[0xE] == 2 and raw[0xC] == 0 and not raw[0x10] & 0x80 and i not in SKIN16
 
 
 def _wrap_pad(img):
@@ -101,7 +107,7 @@ def textures(art, dat, out_file, work, progress=None, use_ai=True):
         if progress and len(raws) % 50 == 0: progress("Reading your game's textures", i / 4001)
     for k, (i, raw) in enumerate(raws.items()):
         if progress and k % 100 == 0: progress("Reading your game's textures", k / len(raws))
-        if i in WATER: continue
+        if i in KEEP: continue
         img = tex_extract.to_image(raw)
         if is_effect(i, raw):   # effects: smooth 4x
             img.resize((img.width * 4, img.height * 4), Image.LANCZOS).save(os.path.join(dst, f"{i:04d}.png"))
@@ -114,9 +120,9 @@ def textures(art, dat, out_file, work, progress=None, use_ai=True):
     hd_build.FRAMES_DIR = fdst
     z = zlib.compressobj(1); n = 0
     with open(out_file + ".tmp", "wb") as f:
-        f.write(b"RQZ1"); f.write(z.compress(struct.pack("<I", len(raws) - len(WATER))))
+        f.write(b"RQZ1"); f.write(z.compress(struct.pack("<I", len([i for i in raws if i not in KEEP]))))
         for k, (i, raw) in enumerate(raws.items()):
-            if i in WATER: continue
+            if i in KEEP: continue
             data = hd_build.hd_raw(raw, os.path.join(dst, f"{i:04d}.png"))
             f.write(z.compress(struct.pack("<2I", i, len(data)) + data)); n += 1
             if progress and k % 100 == 0: progress("Building HD textures", k / len(raws))
@@ -165,7 +171,7 @@ def make(art, dat, dibs, gen, progress=None):
         hud(os.path.join(dibs, next(n for n in os.listdir(dibs) if n.lower() == "hud")), os.path.join(gen, "hud"))
         if progress: progress("Upscaling the menus", 0)
         menus(dibs, os.path.join(gen, "menu.bin"), os.path.join(gen, "work_menu"))
-    open(os.path.join(gen, "done.txt"), "w").write(("ai" if use_ai else "lanczos") + "\n")
+    open(os.path.join(gen, "done.txt"), "w").write(("ai" if use_ai else "lanczos") + " v2\n")
     return use_ai
 
 
