@@ -26,7 +26,7 @@ def masters(dibs, out):
         im = Image.open(os.path.join(dibs, f))
         H.edge_pad(H.fill_key(im.convert("RGB"), im.point(lambda v: 255 if v == KEY else 0, "L"))).save(f"{tin}/{i:03}.png")
     subprocess.run([H.EXE, "-i", tin, "-o", tout, "-n", "realesrgan-x4plus", "-s", "4", "-f", "png"], check=True,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=os.path.dirname(H.EXE))
+                   creationflags=0x08000000, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=os.path.dirname(H.EXE))
     for i, f in enumerate(files):
         w, h = Image.open(os.path.join(dibs, f)).size
         up = Image.open(f"{tout}/{i:03}.png").convert("RGB").crop((4 * PAD, 4 * PAD, 4 * (PAD + w), 4 * (PAD + h)))

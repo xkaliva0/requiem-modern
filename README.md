@@ -3,10 +3,13 @@
 A launcher and set of fixes that make **Requiem: Avenging Angel** (1999, Cyclone Studios / 3DO; GOG version 1.2)
 run properly on Windows 10/11: any resolution and frame rate, widescreen, menus at full resolution, borderless
 alt-tab, EAX audio through DSOAL, the game's own options and key bindings in the launcher, and F10 to change them
-while playing. Optional HD packs (AI-upscaled game art) are built from your own copy of the game.
+while playing. Optional HD art (AI-upscaled textures, HUD icons and menu art) is made by the launcher on your own
+PC, from your own copy of the game.
 
-**Download:** see [Releases](../../releases): one zip with the launcher and the HD art (AI-upscaled versions of the
-game's art, packed inside the exe; each HD option can be switched off). Player documentation: the README inside it.
+**Download:** see [Releases](../../releases): one zip with the launcher. It carries none of the game's art: **MAKE HD
+ART** (main menu) upscales your own game's textures, HUD icons and menu art on your PC with the bundled
+[Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) (needs a Vulkan graphics card; without one the textures are
+enlarged smoothly instead). Player documentation: the README inside the zip.
 
 This repository holds the source only. It contains no game files: the launcher reads and patches the player's own
 copy of the game, and everything it replaces is backed up and can be restored.
@@ -21,7 +24,9 @@ copy of the game, and everything it replaces is backed up and can be restored.
 | `menu/rqmenu.c` | `RequiemMenu.dll`: draws the 2D front end (DirectDraw, 640x480, 8-bit) at the game resolution by scaling every draw call; maps the mouse; borderless alt-tab; F10 and live settings (shared memory, applied on the game's thread). |
 | `mod/art_build.py`, `mod/blast.py` | The texture archive format (PKWARE DCL implode); `blast.py` is a Python port of zlib's blast.c. |
 | `mod/menu_hd.py`, `mod/hud_hd.py` | HD menu art and HUD icons: upscale, back to the original palette and colour key, `RQHD` header with the original size. |
-| `mod/tex_extract.py`, `mod/tex_upscale.py`, `mod/hd_rest.py`, `mod/hd_build.py`, `mod/hd_pack.py` | The HD texture pipeline: extract the game's textures, upscale (Real-ESRGAN), rebuild in the game's formats, pack the payload the launcher appends. |
+| `mod/hd_make.py` | MAKE HD ART: the whole HD pipeline, run by the launcher on the player's PC (textures, skins' animation frames, effects, HUD, menu masters) from their original files. |
+| `mod/tex_extract.py`, `mod/hd_rest.py`, `mod/hd_build.py` | The texture formats: extract, animation frames, rebuild in the game's own formats with the `RQHD` marker. (`tex_upscale.py`, `hd_pack.py`: the original development-time tools.) |
+| `launcher/realesrgan` | realesrgan-ncnn-vulkan and the x4plus model, bundled for MAKE HD ART (licences in `LICENSES.txt` there). |
 | `docs/DEVLOG.md` | The full reverse-engineering and test log: every address, every fix, what was tried and how it was verified. |
 
 ## Building
@@ -31,15 +36,11 @@ for the DLL.
 
 ```bat
 menu\build.bat            :: RequiemMenu.dll (32-bit, zig cc)
-launcher\build.bat lite   :: launcher\dist_lite\Requiem Modern.exe, without HD art
-launcher\build.bat        :: launcher\dist\Requiem Modern.exe, with the HD art if hd\ holds it
+launcher\build.bat        :: launcher\dist\Requiem Modern.exe
 ```
 
-The HD art is not in this repository. To make it from your own copy of the game: extract the textures
-(`mod/tex_extract.py`), upscale them with [Real-ESRGAN ncnn-vulkan](https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan)
-(`mod/tex_upscale.py`, `mod/hd_rest.py`), build and pack them (`mod/hd_build.py`, `mod/hd_pack.py build`); the HUD
-and menu art with `mod/hud_hd.py` and `mod/menu_hd.py masters` / `pack`. The scripts' folder constants at the top
-point at the original development lab; set them to yours. `docs/DEVLOG.md` has the details.
+No game art is in this repository or in the release: the launcher makes it on the player's PC (`mod/hd_make.py`).
+`docs/DEVLOG.md` has the details of every step.
 
 ## Antivirus warnings
 
@@ -55,7 +56,9 @@ repository's source; you can build the exe yourself (see Building).
 - [DSOAL](https://github.com/kcat/dsoal) (LGPL 2.1) and [OpenAL Soft](https://github.com/kcat/openal-soft) (LGPL) by
   kcat, bundled in `launcher/dsoal` (DSOAL r697; licences and version alongside).
 - blast.c by Mark Adler (zlib licence), ported in `mod/blast.py`.
-- [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) (BSD-3-Clause) for the HD art.
+- [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) by Xintao Wang et al. (BSD-3-Clause) and
+  [realesrgan-ncnn-vulkan](https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan) (MIT, on
+  [ncnn](https://github.com/Tencent/ncnn) by Tencent, BSD-3-Clause), bundled in `launcher/realesrgan` for MAKE HD ART.
 - Requiem: Avenging Angel (c) 1999 The 3DO Company / Cyclone Studios.
 
 **How it was made:** reverse-engineered and written by Claude (Anthropic's AI model, Claude Opus, in Claude Code),
@@ -65,4 +68,4 @@ directed and play-tested by the repository owner. Each fix was verified in the r
 ## License
 
 MIT for the Requiem Modern code (`LICENSE`). Bundled third-party parts keep their own licences (`LICENSES/`,
-`launcher/dsoal/`).
+`launcher/dsoal/`, `launcher/realesrgan/`).

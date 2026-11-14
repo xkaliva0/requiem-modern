@@ -821,3 +821,42 @@ Lab folder: the development folder; `mod\`, `launcher\`, `menu\`, `hd\` and `tes
   OpenAL Soft LGPL 2). um publish check: only "verbatim" hits are the DSOAL/OpenAL licence texts (installed in the game
   folder by the launcher itself), kept deliberately. Exe scanned: no username or personal paths.
 - Not published: the HD package redistributes upscaled 3DO art (tester's call where, if anywhere).
+
+## 2.1.0 MAKE HD ART: the HD art is made on the player's PC (2026-11-13)
+- The release carries none of the game's art. `mod/hd_make.py` runs the whole HD pipeline from the player's
+  original files: the texture archive is decoded (blast), every texture except the six water ones upscaled
+  (Real-ESRGAN x4plus with a 16 px wrapped border and alpha kept separately; the 106 16-bit effect textures Lanczos
+  4x), skins' animation frames too, then `hd_build.hd_raw` (4/8/16x, back to the texture's palette / 1555 / 4444,
+  `RQHD` marker) into `textures.bin` (zlib); HUD via `hud_hd.main`, menu masters via `menu_hd.masters` + `pack`.
+  Originals come from the launcher's backups where it has replaced files. `done.txt` is written last.
+- Launcher: art in `%LOCALAPPDATA%\Requiem Modern\HD art`; MAKE HD ART main-menu item, progress page on a worker
+  thread, Esc / closing the window cancels (the upscaler is killed, partial art removed). If Real-ESRGAN cannot run
+  (no Vulkan), the textures are made with Lanczos and the HD HUD / menu options stay hidden.
+- Verified: the art made by the built exe is byte-identical to the hand-made set (2,680 textures, 63 HUD images,
+  172 menu masters), and a game folder installed from it is identical to one installed from the hand-made set
+  (476 files). About 13-18 minutes on the test PC. Exe 56 MB (was 485 MB).
+
+### 2.1.0: generated textures (stained glass) with HD (2026-11-13/14)
+- User screenshot (real game, art made by MAKE HD ART): the stained-glass window at the end of the opening tunnel
+  was combed stripes; same with the shipped 2.0.x set (byte-identical art). Original textures: intact window.
+- Cause: upload paths 2/3 (0x5060fa / 0x506521; type from the texture's object vtable [0]) are generated textures.
+  The set-up copies the source's pixels ([[gen+0x18]+8]+0x10) into new buffers and makes the target surface at the
+  TARGET record size (128x128), then the effects redraw the target from the source every frame, hard-coded to
+  128x128: 0x4f4f30 scroll (dst[(r+py)&127][(c+px)&127] = src[r][c], px/py = (int)pos floats +0x10/+0x14), 0x4f5180
+  ripple and 0x4f53f0 scroll + ripple (dst[r][c] = src[r+ro+floor(E[c]*floor(C[r]*D[phy]))][c+co+floor(T[c]*F[r])],
+  T[k] = floor(A[k]*B[phx]); tables +0x20/+0x24/+0x30/+0x34/+0x48/+0x4c, phases +0x38/+0x3c low 16 bits, floor
+  rounding throughout (0x50fd5b = floor); ro/co = scroll offsets, or (table pointer + 0x400) & 127 in the plain
+  ripple). With an HD source the copy was the first 1/16 of the HD pixels at the wrong row length. Logged in the
+  test copy (cave appending (target, source) pairs to the .data slack): level 1 generates 4001 <- 601,
+  4002 <- 759, 4003 <- 1072 (128x128 8-bit). Sources come from the compressed .jam maps, so no static list.
+- First fix (original pixels appended to HD textures, generator pointed at them) worked but the window was then
+  128x128 between HD walls (user: "low res") and freed an interior pointer; replaced.
+- Fix: patch_d3d gen_patches (CAVE 0x51E760, so not in --trace builds): when the source is HD at exactly 4x the
+  target record, the record holds the HD size during the set-up (buffers, copies, target surface all HD; the source
+  keeps HD pixels matching its HD surface) and gets its size back at 0x506601 (saved at 0x6BF780). RequiemMenu.dll
+  (rqmenu.c gen_hd) detours the three effects: the game's effect runs (keeps its state), then the same effect is
+  redrawn at the HD size; scroll offsets x k; the ripple's integer offsets interpolated between neighbouring
+  128-space pixels so the glass bends smoothly (block moves showed jaggies on the sharp HD lead lines). Only when
+  the target surface really is the HD size (GetSurfaceDesc).
+- Verified (test copy, New Game, level start): window HD, sharp glass and lead lines, smooth ripple; log
+  "HD generated textures: on".

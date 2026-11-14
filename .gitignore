@@ -11,6 +11,7 @@ __pycache__/
 # HD art and anything taken from the game: never in this repository
 hd/
 *.bin
+!launcher/realesrgan/models/*.bin
 *.art
 *.dat
 *.BMP

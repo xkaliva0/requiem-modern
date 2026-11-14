@@ -2,8 +2,8 @@
 
 Point it at the game folder once; it installs the modern setup (DDrawCompat wrapper, its settings, the patched
 D3D.exe built from the original, backups of everything it replaces) and then works as the game's launcher with the
-settings pages. Uses the game's own art and font from the chosen folder at run time; the HD textures (upscaled
-from the game's own) are appended to the exe by build.bat (mod/hd_pack.py).
+settings pages. Uses the game's own art and font from the chosen folder at run time. It carries none of the game's
+art: MAKE HD ART upscales the player's own textures, HUD and menu art on their PC (mod/hd_make.py, bundled Real-ESRGAN).
 Build: build.bat (PyInstaller one-file). Project log: docs/DEVLOG.md
 """
 import ctypes
@@ -17,6 +17,8 @@ import shutil
 import struct
 import subprocess
 import sys
+import threading
+import time
 import tkinter as tk
 import winreg
 from tkinter import filedialog
@@ -26,7 +28,7 @@ from PIL import Image, ImageChops, ImageDraw, ImageTk
 import game_cfg
 import patch_d3d
 
-APP, VERSION = "Requiem Modern", "2.0.2"
+APP, VERSION = "Requiem Modern", "2.1.0"
 W, H = 1280, 720
 CONF_DIR = os.environ.get("REQUIEM_MODERN_CONF") or os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), APP)
 CONF = os.path.join(CONF_DIR, "launcher.json")
@@ -47,7 +49,10 @@ HRTF_INI = "[general]\nchannels=stereo\nstereo-mode=headphones\nstereo-encoding=
 RESOLUTIONS = [(640, 480), (800, 600), (1024, 768), (1280, 720), (1600, 900), (1440, 1080), (1920, 1080),
                (2560, 1080), (2560, 1440), (3440, 1440), (3840, 2160)]
 
-CHANGES = [("2.0.2", [
+CHANGES = [("2.1.0", [
+    "MAKE HD ART (main menu): the launcher makes the HD textures, HUD icons and menu art itself, from your own game files, with the AI upscaler that comes with it (Real-ESRGAN). The download no longer carries any of the game's art, so it is much smaller.",
+    "Fixed: with HD textures, textures the game animates from another texture (the stained-glass window at the end of the opening tunnel) came out as combed stripes. They are now drawn in HD too.",
+]), ("2.0.2", [
     "Fixed: after the game was reinstalled (or GOG checked its files) over an HD install, HD textures and HD menu art were not put back. The launcher now checks the files themselves.",
 ]), ("2.0.1", [
     "The game's volumes and footsteps are on the Audio tab.",
@@ -227,27 +232,33 @@ HD_MAGIC, HD_MARK = b"RQHDPAK1", "ReqArtD3.hd"
 
 
 MENU_MAGIC, MENU_DLL, MENU_CFG, MENU_MARK = b"RQMNPAK1", "RequiemMenu.dll", "RequiemMenu.cfg", "RequiemMenu.art"
+GEN = os.path.join(os.environ.get("LOCALAPPDATA") or CONF_DIR, APP, "HD art")   # the HD art made on this PC
+UPSCALER = os.path.join("realesrgan", "realesrgan-ncnn-vulkan.exe")             # bundled: res_path(UPSCALER)
+
+
+def art_made():
+    """MAKE HD ART finished (done.txt is written last)."""
+    return os.path.exists(os.path.join(GEN, "done.txt"))
+
+
+def hud_src():
+    return os.environ.get("REQUIEM_MODERN_HUD") or (os.path.join(GEN, "hud") if art_made() else "")
+
+
+def art_avail():
+    """The HD options are shown only once their art exists."""
+    hd = bool(hd_payload())
+    return {"hd": hd, "hdfx": hd, "hdhud": os.path.isdir(hud_src()), "hdmenu": bool(payload(MENU_MAGIC, "REQUIEM_MODERN_MENU"))}
 
 
 def payload(magic, env):
-    """(path, offset, size) of a payload appended to this exe (blocks stack from the end: [exe][textures]
-    [RQHDPAK1 n][menu masters][RQMNPAK1 n]), or the file named by env when run from source; None if absent."""
+    """(path, offset, size) of the HD texture (RQHDPAK1) or menu-master (RQMNPAK1) payload: the file named by env
+    when run from source, else the one MAKE HD ART made on this PC; None if absent."""
     dev = os.environ.get(env)
     if dev and os.path.exists(dev):
         return dev, 0, os.path.getsize(dev)
-    if not getattr(sys, "frozen", False):
-        return None
-    with open(sys.executable, "rb") as f:
-        end = f.seek(0, 2)
-        while end > 16:
-            f.seek(end - 16); tail = f.read(16)
-            if tail[:8] not in (HD_MAGIC, MENU_MAGIC):
-                return None
-            size = struct.unpack("<Q", tail[8:])[0]
-            if tail[:8] == magic:
-                return sys.executable, end - 16 - size, size
-            end -= 16 + size
-    return None
+    p = os.path.join(GEN, "textures.bin" if magic == HD_MAGIC else "menu.bin")
+    return (p, 0, os.path.getsize(p)) if art_made() and os.path.exists(p) else None
 
 
 def hd_payload():
@@ -302,9 +313,9 @@ def tex_update_needed(folder, s):
 
 
 def set_hud(folder, on):
-    """HD HUD icons and digits (media/DIBs/HUD, bundled in the exe as hud/): on backs up each original once and
+    """HD HUD icons and digits (media/DIBs/HUD, made by MAKE HD ART into GEN/hud): on backs up each original once and
     writes the HD BMP (its header carries the original size, read by patch_d3d's HD HUD caves); off restores them."""
-    src, d = res_path("hud"), find_ci(folder, "media", "DIBs", "HUD")
+    src, d = hud_src(), find_ci(folder, "media", "DIBs", "HUD")
     if not d or not os.path.isdir(src):
         return
     bk = os.path.join(folder, BACKUP, "HUD")
@@ -401,7 +412,7 @@ def set_hd(folder, sel):
     payload's 4x textures of the chosen groups (literal-only PKWARE streams, which the game's explode() reads) and
     every other entry copied as it was. patch_d3d's HD caves keep texture coordinates at the original size.
     '00': put the backed-up originals back."""
-    import art_build, lzma
+    import art_build, hd_make
     on = sel != "00"
     d = find_ci(folder, "Art", "D3D")
     if not d:
@@ -422,8 +433,7 @@ def set_hd(folder, sel):
                 raise SystemExit(f"{os.path.basename(src)} is not the GOG original, so HD textures were not installed.")
             shutil.copyfile(src, dst)
     path, off, size = p
-    with open(path, "rb") as f:
-        f.seek(off); data = lzma.decompress(f.read(size))
+    data = hd_make.read_payload(path, off, size)
     hd, pos = {}, 4
     for _ in range(struct.unpack_from("<I", data, 0)[0]):
         i, n = struct.unpack_from("<2I", data, pos); t = data[pos + 8:pos + 8 + n]; pos += 8 + n
@@ -759,14 +769,14 @@ class App:
         self.pending = dict(self.conf["settings"])   # edited on the settings page; Apply installs them
         self.keys_row = self.keys_top = 0; self.capture = False
         self.ingame, self.game_proc, self.f10_event = False, None, None
-        # HD options only in a build that carries the HD art (the release without game art has none)
-        self.avail = {"hd": bool(hd_payload()), "hdfx": bool(hd_payload()), "hdhud": os.path.isdir(res_path("hud")),
-                      "hdmenu": bool(payload(MENU_MAGIC, "REQUIEM_MODERN_MENU"))}
+        self.avail = art_avail()   # HD options only once MAKE HD ART has made the art
+        self.making = None
         ctypes.windll.kernel32.CreateMutexW(None, False, "Local\\RequiemModernLauncher")   # tells the game F10 works
         self.head_font = self.load_game_font()
         self.root = tk.Tk(); self.root.title(f"Requiem: Avenging Angel - {APP} {VERSION}"); self.root.resizable(False, False)
         self.root.geometry(f"{W}x{H}+{max(0, (DW - W) // 2)}+{max(0, (DH - H) // 2)}")
         self.c = tk.Canvas(self.root, width=W, height=H, highlightthickness=0, bg="#0c0b0a"); self.c.pack()
+        self.root.protocol("WM_DELETE_WINDOW", self.quit)
         self.page, self.sel, self.tab, self.row, self.msg = "main", 0, 0, 0, None
         self.images = {}
         for key in ("<Up>", "<Down>", "<Left>", "<Right>", "<Return>", "<Escape>", "<q>", "<e>", "<p>", "<Delete>", "<r>", "<a>", "<d>"):
@@ -800,6 +810,9 @@ class App:
         if tag not in self.images:
             path = find_ci(self.game, "media", "dibs", splash.split("/")[0], splash.split("/")[1]) if self.game else None
             src = Image.open(path).convert("RGB") if path else Image.new("RGB", (640, 480), "#1a1612")
+            hd = open(path, "rb").read(46) if path else b""
+            if art_scale and hd[38:42] == b"RQHD":   # HD menu art: drawn at its original (logical) size
+                art_scale *= struct.unpack_from("<H", hd, 42)[0] / src.width
             cover = max(W / src.width, H / src.height)
             im = src.resize((round(src.width * cover), round(src.height * cover)), Image.LANCZOS).crop((0, 0, W, H))
             if art_scale:
@@ -850,9 +863,12 @@ class App:
                  "Puts the modern files back (wrapper, its settings, patched D3D.exe) if something replaced them, "
                  "e.g. a GOG update or file check. Your settings are kept." if installed else
                  "Installs the modern setup into the game folder. Everything it replaces is backed up first."),
+                *([("MAKE HD ART", self.make_art,
+                    "Makes HD textures, HUD icons and menu art from your own game files with the bundled AI upscaler "
+                    "(Real-ESRGAN). Done once; then turn the HD options on in Settings, Graphics.")] if self.state in ("ready", "installed") and not art_made() else []),
                 ("RESTORE ORIGINAL GAME", self.do_restore, "Removes the modern setup and puts every original file back."),
                 ("GAME FOLDER", lambda: self.goto("setup"), "Choose a different Requiem folder."),
-                ("QUIT", self.root.destroy, "Close the launcher.")]
+                ("QUIT", self.quit, "Close the launcher.")]
 
     def draw(self):
         self.c.delete("all"); self.hits = []
@@ -866,10 +882,10 @@ class App:
 
     def draw_main(self):
         self.c.create_image(0, 0, image=self.background("main", "Splash01/splash01.BMP", 0.05, 1.25), anchor="nw")
-        items = self.main_items()
-        self.text(76, 258 + len(items) * 46 + 8, items[self.sel][2], 11, DIM, width=760)
+        items = self.main_items(); step = 46 if len(items) <= 6 else 41
+        self.text(76, 258 + len(items) * step + 8, items[self.sel][2], 11, DIM, width=760)
         for i, (label, _, _) in enumerate(items):
-            y = 258 + i * 46
+            y = 258 + i * step
             if i == self.sel:
                 self.c.create_rectangle(56, y + 6, 61, y + 40, fill=GOLD, outline="")
             t = self.text(76, y, label, 26, TEXT if i == self.sel else "#bdb6aa", head=True)
@@ -881,6 +897,80 @@ class App:
             self.text(76 + i * 230, H - 120, k, 10, DIM); self.text(76 + i * 230, H - 98, v, 12)
         self.text(76, H - 62, self.game or "", 9, DIM)
         self.hints([("Enter", "Select"), ("Esc", "Quit")])
+
+    def draw_making(self):
+        m = self.making
+        self.c.create_image(0, 0, image=self.background("setup", "Splash01/splash01.BMP", 0.25, 1.25), anchor="nw")
+        self.text(76, 262, "MAKING HD ART", 30, GOLD, head=True)
+        self.text(76, 314, "Your game's textures, HUD icons and menu art are being upscaled on this PC with Real-ESRGAN. "
+                           "This is done once. You can use your PC meanwhile; the graphics card is busy.", 12, width=760)
+        self.text(76, 392, m["label"], 13)
+        x0, y0, x1 = 76, 424, 836
+        self.c.create_rectangle(x0, y0, x1, y0 + 12, outline="#5a5245", fill="#16130f")
+        self.c.create_rectangle(x0, y0, x0 + (x1 - x0) * min(1.0, m["frac"]), y0 + 12, outline="", fill=GOLD)
+        e = int(time.time() - m["t0"])
+        self.text(76, 446, f"{int(m['frac'] * 100)}%      {e // 3600}:{e // 60 % 60:02d}:{e % 60:02d} so far", 11, DIM)
+        self.hints([("Esc", "Cancel")])
+
+    def make_art(self):
+        """MAKE HD ART: hd_make.make on a worker thread from the game's original files (the launcher's backups where
+        it has replaced them) into GEN; this page shows its progress."""
+        if game_running():
+            self.say("GAME IS RUNNING", "Close Requiem first, then try again."); return
+        d, bk = find_ci(self.game, "Art", "D3D"), os.path.join(self.game, BACKUP)
+        art = next((p for p in (os.path.join(bk, "ReqArtD3.art"), os.path.join(d or "", "ReqArtD3.art"))
+                    if os.path.exists(p) and sha(p) == GOG_ART), None)
+        dibs = find_ci(self.game, "media", "DIBs")
+        if not art or not dibs:
+            self.say("CANNOT MAKE HD ART", "The game's original textures (Art\\D3D\\ReqArtD3.art from GOG v1.2) are not in "
+                                           "this folder. Reinstall the game or let GOG check its files, then try again."); return
+        os.makedirs(os.path.dirname(GEN), exist_ok=True)
+        if shutil.disk_usage(os.path.dirname(GEN)).free < 5e9:
+            self.say("NOT ENOUGH SPACE", "Making the HD art needs about 5 GB free on " + os.path.splitdrive(GEN)[0]
+                     + " while it works (about 1 GB once it is done)."); return
+        m = self.making = {"label": "Starting", "frac": 0.0, "t0": time.time(), "done": None, "cancel": False, "quit": False}
+        work = os.path.join(os.path.dirname(GEN), "HD art work")
+
+        def progress(label, frac):
+            if m["cancel"]: raise InterruptedError("cancelled")
+            m["label"], m["frac"] = label, frac
+
+        def run():
+            import hd_make
+            try:
+                hd_make.EXE = res_path(UPSCALER)
+                src = hd_make.originals(dibs, bk, os.path.join(work, "DIBs"))
+                m["done"] = ("ok", hd_make.make(art, art[:-4] + ".dat", src, GEN, progress))
+            except BaseException as ex:
+                shutil.rmtree(GEN, ignore_errors=True)
+                m["done"] = ("cancel" if m["cancel"] else "error", f"{type(ex).__name__}: {ex}")
+            finally:
+                shutil.rmtree(work, ignore_errors=True)
+        threading.Thread(target=run, daemon=True).start()
+        self.page = "making"; self.draw()
+        self.root.after(500, self.watch_making)
+
+    def watch_making(self):
+        m = self.making
+        if m["done"] is None:
+            self.draw(); self.root.after(500, self.watch_making); return
+        if m["quit"]:
+            self.root.destroy(); return
+        kind, info = m["done"]
+        self.making, self.avail, self.page, self.sel = None, art_avail(), "main", 0
+        if kind == "ok":
+            self.say("HD ART READY", "Turn on the HD options in Settings, Graphics, and Apply." + ("" if info else
+                     " Your graphics card could not run the AI upscaler, so the textures were enlarged smoothly instead "
+                     "and HD HUD icons and HD menu art are not available."))
+        elif kind == "cancel":
+            self.say("CANCELLED", "No HD art was made.")
+        else:
+            self.say("COULD NOT MAKE HD ART", info)
+
+    def quit(self):
+        if self.making:   # stop the upscaler first; watch_making closes the window when it has
+            self.making["cancel"] = self.making["quit"] = True; self.making["label"] = "Cancelling"; return
+        self.root.destroy()
 
     def draw_setup(self):
         self.c.create_image(0, 0, image=self.background("setup", "Splash01/splash01.BMP", 0.25, 1.25), anchor="nw")
@@ -1023,7 +1113,8 @@ class App:
         self.c.create_line(730, 90, 730, H - 90, fill="#3a352d")
         self.text(x, 96, APP, 24, TEXT, head=True)
         self.text(x, 146, f"Version {VERSION} for Requiem: Avenging Angel (GOG v1.2, Direct3D).\n\nGame folder:\n{self.game}\n\n"
-                          "Uses DDrawCompat 0.7.2 by narzoul (0BSD licence). The menus here use the game's own art and font, "
+                          "Uses DDrawCompat 0.7.2 by narzoul (0BSD licence). HD art is made on your PC with Real-ESRGAN "
+                          "by Xintao Wang et al. (realesrgan-ncnn-vulkan, MIT; ncnn by Tencent, BSD-3). The menus here use the game's own art and font, "
                           "read from your game folder.\n\nRestore original game (main menu) puts back every file this "
                           "mod replaced.", 11, "#d8d2c6", width=460)
 
@@ -1059,6 +1150,9 @@ class App:
 
     def on_key(self, e):
         k = e.keysym
+        if self.page == "making":
+            if k == "Escape": self.making["cancel"] = True; self.making["label"] = "Cancelling"
+            return
         if self.page == "keys" and not self.msg:
             self.keys_input(k, e); return
         if self.msg:
@@ -1070,7 +1164,7 @@ class App:
             elif k == "Down": self.sel = (self.sel + 1) % len(items)
             elif k == "Return": items[self.sel][1](); return
             elif k == "Escape":
-                if self.page == "main": self.root.destroy(); return
+                if self.page == "main": self.quit(); return
                 if "game" in self.conf: self.goto("main"); return
             self.draw(); return
         rows = self.tab_rows()

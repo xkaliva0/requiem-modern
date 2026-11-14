@@ -1,6 +1,6 @@
 """Patch Requiem: Avenging Angel D3D.exe (GOG v1.2, built 2001-02-22) for modern Windows.
 
-Usage: py patch_d3d.py "<game folder>\\D3D.exe" [--aspect 16:9]
+Usage: py patch_d3d.py "E:\\Requiem - Avenging Angel\\D3D.exe" [--aspect 16:9]
 Saves D3D.exe.orig next to it on first run and always rebuilds from that, so re-running
 (with the same or a different --aspect) is safe. Default aspect 4:3 = the game's own view.
 """
@@ -474,6 +474,41 @@ def aspect_patches(aspect):
 
 
 CAVE = 0x51E760   # unused tail of .text (vsize ends 0x51e760, mapped to 0x51f000, zeros in the file)
+
+# HD textures and the game's generated textures (stained glass, glows: upload paths 2/3 at 0x5060fa, record ebx,
+# generator [ebx+0x14], its source record [gen+0x18]). The generator's set-up copies the source's pixels into new
+# buffers and makes the target surface, all at the TARGET record's size (128x128; the effects 0x4f4f30 / 0x4f5180 /
+# 0x4f53f0 are written for 128x128); with an HD source that copy was the first 1/16 of the HD pixels at the wrong
+# row length (user: the opening tunnel's window "combed"). Here, when the source is HD at exactly 4x the target
+# record, the record holds the HD size during the set-up (buffers, copies and surface all HD; the source keeps HD
+# pixels to match its HD surface) and gets its original size back at the end (0x506601), so texture coordinates
+# stay as designed. RequiemMenu.dll then redraws the effects at the HD size every frame (rqmenu.c gen_hd).
+# Shares CAVE with the --trace diagnostics, so it is left out of --trace builds.
+_GENSAVE = 0x6BF780   # .data slack (after the trace RING, which ends 0x6bf610): record being set up, its size
+def gen_patches():
+    a = (b"\x8b\x7b\x14" b"\x89\x7c\x24\x1c"              # displaced: edi = generator; [esp+0x1c] = edi
+         b"\x8b\x47\x18" b"\x8b\x40\x08"                  # eax = source record -> its texture object
+         b"\x8b\x48\x14" b"\x83\xe9\x12"                  # ecx = its decoded header (palette - 0x12)
+         b"\x0f\xb7\x11" b"\x0f\xb7\x41\x02"              # edx = source w, eax = source h (both reloaded after the cave)
+         b"\x0f\xb7\x4b\x04" b"\xc1\xe1\x02" b"\x39\xd1" b"\x75\x22"   # 4 * record w != w -> back
+         b"\x0f\xb7\x4b\x06" b"\xc1\xe1\x02" b"\x39\xc1" b"\x75\x17"   # 4 * record h != h -> back
+         b"\x8b\x4b\x04" b"\x89\x0d" + struct.pack("<I", _GENSAVE + 4)   # save the record size
+         + b"\x89\x1d" + struct.pack("<I", _GENSAVE)                     # and the record
+         + b"\x66\x89\x53\x04" b"\x66\x89\x43\x06")                     # record = HD size for the set-up
+    a += _jmp(CAVE + len(a), 0x506101)
+    b_at = CAVE + len(a)
+    b = (b"\x3b\x1d" + struct.pack("<I", _GENSAVE) + b"\x75\x12"           # not the record being set up -> skip
+         + b"\xa1" + struct.pack("<I", _GENSAVE + 4) + b"\x89\x43\x04"   # original size back
+         + b"\xc7\x05" + struct.pack("<I", _GENSAVE) + b"\x00\x00\x00\x00"
+         + b"\x0f\xbf\x43\x04" b"\x0f\xbf\x4b\x06")                     # displaced: movsx eax/ecx, [ebx+4]/[ebx+6]
+    b += _jmp(b_at + len(b), 0x506609)
+    c = a + b
+    assert CAVE + len(c) <= _DECAY
+    return [(CAVE, bytes(len(c)), c, "HD textures: generated textures set up at the HD size (code)"),
+            (0x5060FA, bytes.fromhex("8b7b14897c241c"), _jmp(0x5060FA, CAVE) + b"\x90\x90",
+             "HD textures: generated textures (stained glass) set up at the HD size"),
+            (0x506601, bytes.fromhex("0fbf43040fbf4b06"), _jmp(0x506601, b_at) + b"\x90\x90\x90",
+             "HD textures: generated textures keep their original record size")]
 RING = 0x6BF400   # unused tail of .data (vsize ends 0x6bf2f8, mapped to 0x6c0000): dword index, then 32 x 16-byte entries
 FRAME = 0x531FD8  # frame counter, incremented at the top of the frame function 0x448450
 DEVICE = 0x6B9F74  # IDirect3DDevice3*
@@ -560,7 +595,7 @@ def build(exe, aspect="4:3", hud=0, trace=False):
         shutil.copyfile(exe, orig)
     pe = pefile.PE(orig, fast_load=True)
     data = bytearray(open(orig, "rb").read())
-    apply(data, pe, PATCHES + aspect_patches(w / h) + (trace_patches() if trace else [])
+    apply(data, pe, PATCHES + aspect_patches(w / h) + (trace_patches() if trace else gen_patches())
           + (hud_patches(hud)[0] if hud else []))
     pe.close()
     open(exe, "wb").write(data)

@@ -76,7 +76,7 @@ def main(src, dst):
         rgb = fill_key(im.convert("RGB"), mask)
         edge_pad(rgb).save(os.path.join(tin, f"{i:03}.png"))
     subprocess.run([EXE, "-i", tin, "-o", tout, "-n", "realesrgan-x4plus", "-s", str(S), "-f", "png"], check=True,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=os.path.dirname(EXE))
+                   creationflags=0x08000000, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=os.path.dirname(EXE))
     for i, f in enumerate(files):
         im = Image.open(os.path.join(src, f)); w, h = im.size
         up = Image.open(os.path.join(tout, f"{i:03}.png")).convert("RGB").crop((S * PAD, S * PAD, S * (PAD + w), S * (PAD + h)))

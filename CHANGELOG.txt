@@ -1,6 +1,13 @@
 Requiem Modern - changelog
 ==========================
 
+2.1.0
+  - MAKE HD ART (main menu): the launcher makes the HD textures, HUD icons and menu art itself, from your own game files, with the AI upscaler that comes with it (Real-ESRGAN). The download no longer carries any of the game's art, so it is much smaller.
+  - Fixed: with HD textures, textures the game animates from another texture (the stained-glass window at the end of the opening tunnel) came out as combed stripes. They are now drawn in HD too.
+
+2.0.2
+  - Fixed: after the game was reinstalled (or GOG checked its files) over an HD install, HD textures and HD menu art were not put back. The launcher now checks the files themselves.
+
 2.0.1
   - The game's volumes and footsteps are on the Audio tab.
   - Clicking the left arrow of a setting steps it down (clicking anywhere else on the row still steps it up).

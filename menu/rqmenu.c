@@ -504,6 +504,102 @@ static void hook_showwindow(void) {
     if (oShow) LOG("borderless: alt-tab keeps the game on screen\n");
 }
 
+/* ---------------------------------------------------------------- HD generated textures
+ * Generated textures (stained glass, glows) are 128x128 effects the game redraws from a source texture every frame:
+ * 0x4f4f30 scroll, 0x4f5180 ripple, 0x4f53f0 scroll + ripple (thiscall, ecx = generator; flags +4 (0x10 = 16-bit),
+ * position floats +0x10/+0x14, source record +0x18 (-> +8 texture object: +0x10 pixels, +0x14 palette = header +
+ * 0x12), target texture object +0x1c (+0x10 pixels, +0x1c surface), ripple tables +0x20/+0x24/+0x30/+0x34/+0x48/+0x4c,
+ * phase counters +0x38/+0x3c (low 16 bits)). patch_d3d makes a generator whose source is HD allocate its buffers and
+ * surface at the HD size (the record keeps the original size for texture coordinates). Here the game's own effect
+ * runs first (it keeps its state; at 128x128 it only touches the first rows of the HD buffers), then the same effect
+ * is redrawn at the HD size: every 128-space pixel decision is the game's (same maths, floor rounding), applied to
+ * the k x k block of HD pixels it stands for. */
+typedef void(__attribute__((thiscall)) * GenFx_t)(BYTE *g);
+static GenFx_t oScroll, oRipple, oScrollRipple;
+
+static int gen_hd_size(BYTE *g, int *w, int *h) {
+    BYTE *src = *(BYTE **)(*(BYTE **)(g + 0x18) + 8), *hdr = *(BYTE **)(src + 0x14) - 0x12;
+    *w = *(WORD *)hdr; *h = *(WORD *)(hdr + 2);
+    if ((*w <= 256 && *h <= 256) || *w % 128 || *h % 128) return 0;
+    void *surf = *(void **)(*(BYTE **)(g + 0x1c) + 0x1c);   /* the target surface must really be that big */
+    DWORD d[31] = {124};
+    typedef HRESULT(WINAPI * Desc_t)(void *, DWORD *);
+    if (!surf || (*(Desc_t **)surf)[22](surf, d) != 0) return 0;   /* GetSurfaceDesc */
+    return (int)d[3] == *w && (int)d[2] == *h;              /* DDSURFACEDESC2: +8 height, +12 width */
+}
+
+static void gen_hd(BYTE *g, int kind) {   /* kind 0 scroll, 1 ripple, 2 scroll + ripple */
+    int W, H;
+    if (!gen_hd_size(g, &W, &H)) return;
+    int kx = W / 128, ky = H / 128, bpp = (g[4] & 0x10) ? 2 : 1;
+    BYTE *src = *(BYTE **)(*(BYTE **)(*(BYTE **)(g + 0x18) + 8) + 0x10), *dst = *(BYTE **)(*(BYTE **)(g + 0x1c) + 0x10);
+    int px = (int)*(float *)(g + 0x10) & 127, py = (int)*(float *)(g + 0x14) & 127;
+    if (kind == 0) {                       /* dst[(r + py) & 127][(c + px) & 127] = src[r][c] */
+        for (int R = 0; R < H; R++) {
+            BYTE *s = src + (size_t)R * W * bpp, *d = dst + (size_t)((R + py * ky) % H) * W * bpp;
+            int o = px * kx * bpp, n = W * bpp;
+            memcpy(d + o, s, n - o); memcpy(d, s + n - o, o);
+        }
+        return;
+    }
+    float *A = *(float **)(g + 0x30), *B = *(float **)(g + 0x48), *C = *(float **)(g + 0x34), *D = *(float **)(g + 0x4c);
+    float *E = *(float **)(g + 0x20), *F = *(float **)(g + 0x24);
+    int phx = *(DWORD *)(g + 0x38) & 0xffff, phy = *(DWORD *)(g + 0x3c) & 0xffff;
+    int ro = kind == 1 ? (int)(((DWORD)F + 0x400) & 127) : px, co = kind == 1 ? (int)(((DWORD)E + 0x400) & 127) : py;
+    float T[128];
+    for (int k = 0; k < 128; k++) T[k] = (float)floor((double)A[k] * B[phx]);
+    /* the game's offsets: dst[r][c] = src[r + ro + dr][c + co + dc]. At the HD size they are interpolated between
+     * neighbouring 128-space pixels (wrapping, like the texture), so the glass bends smoothly instead of moving in
+     * k x k blocks (sharp HD lead lines showed the steps as jaggies). */
+    static float dr[128][128], dc[128][128];
+    for (int r = 0; r < 128; r++) {
+        double Rr = floor((double)C[r] * D[phy]);
+        for (int c = 0; c < 128; c++) {
+            dr[r][c] = (float)(ro + floor((double)E[c] * Rr));
+            dc[r][c] = (float)(co + floor((double)T[c] * F[r]));
+        }
+    }
+    static int c0[2048], c1[2048]; static float tx[2048];
+    if (W > 2048) return;
+    for (int C2 = 0; C2 < W; C2++) {
+        float g = (C2 + 0.5f) / kx - 0.5f, f = floorf(g);
+        c0[C2] = ((int)f + 128) & 127; c1[C2] = (c0[C2] + 1) & 127; tx[C2] = g - f;
+    }
+    for (int R = 0; R < H; R++) {
+        float g = (R + 0.5f) / ky - 0.5f, f = floorf(g), ty = g - f;
+        int r0 = ((int)f + 128) & 127, r1 = (r0 + 1) & 127;
+        BYTE *d = dst + (size_t)R * W * bpp;
+        for (int C2 = 0; C2 < W; C2++) {
+            int a = c0[C2], b = c1[C2]; float t = tx[C2];
+            float vr = (dr[r0][a] + (dr[r0][b] - dr[r0][a]) * t) * (1 - ty) + (dr[r1][a] + (dr[r1][b] - dr[r1][a]) * t) * ty;
+            float vc = (dc[r0][a] + (dc[r0][b] - dc[r0][a]) * t) * (1 - ty) + (dc[r1][a] + (dc[r1][b] - dc[r1][a]) * t) * ty;
+            int sy = (R + (int)lrintf(vr * ky)) % H, sx = (C2 + (int)lrintf(vc * kx)) % W;
+            if (sy < 0) sy += H;
+            if (sx < 0) sx += W;
+            const BYTE *s = src + ((size_t)sy * W + sx) * bpp;
+            if (bpp == 2) *(WORD *)(d + C2 * 2) = *(const WORD *)s; else d[C2] = *s;
+        }
+    }
+}
+static void __attribute__((thiscall)) myScroll(BYTE *g) { oScroll(g); gen_hd(g, 0); }
+static void __attribute__((thiscall)) myRipple(BYTE *g) { oRipple(g); gen_hd(g, 1); }
+static void __attribute__((thiscall)) myScrollRipple(BYTE *g) { oScrollRipple(g); gen_hd(g, 2); }
+
+static void *detour(DWORD at, const char *hex, int n, void *fn) {   /* jmp at -> fn; returns a trampoline */
+    if (!same(at, hex)) return 0;
+    BYTE *t = VirtualAlloc(0, 32, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    if (!t) return 0;
+    memcpy(t, (void *)at, n); t[n] = 0xE9; rel32(t + n + 1, (DWORD)t + n + 5, at + n);
+    BYTE j[5] = {0xE9}; rel32(j + 1, at + 5, (DWORD)fn);
+    return patch(at, j, 5) ? t : 0;
+}
+static void hook_gen(void) {
+    oScroll = (GenFx_t)detour(0x4F4F30, "83ec0c535556", 6, myScroll);
+    oRipple = (GenFx_t)detour(0x4F5180, "558bec81ec2c020000", 9, myRipple);
+    oScrollRipple = (GenFx_t)detour(0x4F53F0, "558bec81ec3c020000", 9, myScrollRipple);
+    LOG("HD generated textures: %s\n", oScroll && oRipple && oScrollRipple ? "on" : "FAILED");
+}
+
 static void install(void) {
     char path[MAX_PATH], *sl;
     GetModuleFileNameA(0, path, MAX_PATH);
@@ -527,6 +623,7 @@ static void install(void) {
     if (ev) CloseHandle(CreateThread(0, 0, f10_watch, ev, 0, 0));
     CloseHandle(CreateThread(0, 0, keeper, 0, 0, 0));
     LOG("F10 settings and live changes ready\n");
+    hook_gen();
     if (w < 640 || h < 480 || (w == 640 && h == 480) || w > 7680 || h > 4320) return;
     W = w; H = h;
     S = fminf(W / 640.f, H / 480.f);
