@@ -8,7 +8,8 @@ import os, struct, sys
 from PIL import Image, ImageChops, ImageFilter, ImageMath, ImageStat
 import art_build, tex_extract
 
-HD_DIR, FRAMES_DIR = r"E:\requiem-mod-lab\hd\x4", r"E:\requiem-mod-lab\hd\x4_frames"
+LAB = os.environ.get("REQUIEM_LAB", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # repo root by default
+HD_DIR, FRAMES_DIR = os.path.join(LAB, "hd", "x4"), os.path.join(LAB, "hd", "x4_frames")
 
 def scale_of(w, h):
     return next(s for s in (4, 8, 16) if max(w, h) * s > 256)
